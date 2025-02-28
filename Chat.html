@@ -1,0 +1,220 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <meta charset="UTF-8">
+    <title>DeepSeek-R1</title>
+    <style>
+        .content {
+            max-width: 100vh;
+            margin: 0 auto;
+            box-sizing: border-box;
+        }
+
+        .circle {
+            list-style-type: circle;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="content">
+        <div>
+            <form>
+                <label for="api_url">API URL</label>
+                <textarea id="api_url" rows="1"></textarea>
+                <button type="button" onclick="setApiUrl()">确定</button>
+            </form>
+            <form>
+                <label for="auth_h_name">认证头名称</label>
+                <textarea id="auth_h_name" rows="1"></textarea>
+                <button type="button" onclick="setAuthHeaderName()">确定</button>
+            </form>
+            <form>
+                <label for="auth_h_content">认证头内容</label>
+                <textarea id="auth_h_content" rows="1"></textarea>
+                <button type="button" onclick="setAuthHeaderContent()">确定</button>
+            </form>
+        </div>
+        <hr>
+        <div>
+            <form>
+                <label for="temperature">Temperature:</label>
+                <textarea id="temperature" rows="1" cols="5"></textarea>
+                <button type="button" onclick="setTemperature()">确定</button>
+            </form>
+        </div>
+        <hr>
+        <div id="message-list">
+            <label>历史记录:</label>
+            <ul>
+            </ul>
+        </div>
+        <hr>
+        <div>
+            <form>
+                <label for="message">用户输入:</label>
+                <textarea id="message" rows="4" style="width: 95%;"></textarea>
+                <br>
+                <br>
+                <button type="button" onclick="sendMessage()">发送</button>
+            </form>
+        </div>
+        <hr>
+        <div>
+            <button onclick="downloadJSON()">下载历史记录</button>
+        </div>
+        <div>
+            <button onclick="parseJSON()">上传历史记录</button>
+            <input type="file" id="file-input">
+        </div>
+        <hr>
+        <div id="usage">
+            <p>当前使用量(Tokens): 输入=0, 输出=0, 总计=0</p>
+        </div>
+        <div>
+            <button onclick="deleteFirstMessagePair()">删除第一对消息</button>
+        </div>
+    </div>
+    <script>
+        const role_user = "";
+        const role_assistant = " ";
+        const error_msg = "(未发送)";
+
+        const messageList = document.getElementById('message-list');
+        const usageList = document.getElementById('usage');
+
+        const apiUrlInput = document.getElementById('api_url');
+        const authHeaderNameInput = document.getElementById('auth_h_name');
+        const authHeaderContentInput = document.getElementById('auth_h_content')
+        const temperatureInput = document.getElementById('temperature');
+        const messageInput = document.getElementById('message');
+
+        let api_endpoint_url = "";
+        let auth_header_name = "Authorization";
+        let auth_header_content = "";
+        let chatHistory = new Array();
+        let temperature = 1.0;
+
+
+        function setApiUrl() {
+            api_endpoint_url = apiUrlInput.value;
+        }
+        function setAuthHeaderName() {
+            auth_header_name = authHeaderNameInput.value;
+        }
+        function setAuthHeaderContent() {
+            auth_header_content = authHeaderContentInput.value;
+        }
+        function setTemperature() {
+            temperature = parseFloat(temperatureInput.value);
+        }
+
+
+        function deleteFirstMessagePair() {
+            if (chatHistory.length >= 2) {
+                chatHistory.splice(0, 2);
+            }
+        }
+
+        function updateUsage(response) {
+            const c = response.usage.completion_tokens, p = response.usage.prompt_tokens, tot = response.usage.total_tokens;
+            usageList.innerHTML = "<p>当前使用量(Tokens): " + "输入=" + p.toString() + ", 输出=" + c.toString() + ", 总计=" + tot.toString() + "</p>";
+        }
+        function getSubstringAfter(str, subStr) {
+            const index = str.indexOf(subStr);
+            if (index === -1) return str;
+            return str.substring(index + subStr.length);
+        }
+        function addMessage(message, sender) {
+            const hr = document.createElement('hr');
+            hr.style = "border:1px #cccccc dotted;"
+            messageList.querySelector('ul').appendChild(hr);
+
+            const li = document.createElement('li');
+            if (sender === role_assistant) li.className = "circle"
+            li.innerText = `${sender}${message}\n`;
+            messageList.querySelector('ul').appendChild(li);
+        }
+
+
+        function sendMessage() {
+            const message = messageInput.value;
+            messageInput.value = '';
+
+            chatHistory.push({ "role": "user", "content": message });
+            let reqBody = { "model": "DeepSeek-R1", "messages": chatHistory, "temperature": temperature };
+
+            const xhr = new XMLHttpRequest();
+            xhr.open('POST', api_endpoint_url);
+            xhr.setRequestHeader('Content-Type', 'application/json');
+            xhr.setRequestHeader(auth_header_name, auth_header_content);
+            xhr.onload = () => {
+                if (xhr.status === 200) {
+                    const response = JSON.parse(xhr.responseText);
+                    updateUsage(response);
+                    trimmedResponse = getSubstringAfter(response.choices[0].message.content, "</think>\n\n")
+
+                    addMessage(message, role_user);
+                    addMessage(trimmedResponse, role_assistant);
+                    chatHistory.push({ "role": "assistant", "content": trimmedResponse });
+                } else {
+                    addMessage(message, role_user + error_msg);
+                    addMessage('消息发送失败，请重试。错误信息：' + xhr.responseText, "系统: ");
+                    chatHistory.pop();
+                }
+            };
+            xhr.onerror = () => {
+                addMessage(message, role_user + error_msg);
+                addMessage('消息发送失败，请重试。' + xhr.statusText, "系统: ");
+                chatHistory.pop();
+            };
+            xhr.send(JSON.stringify(reqBody));
+        }
+
+
+
+
+
+        function parseJSON() {
+            const fileInput = document.getElementById("file-input");
+            const file = fileInput.files[0];
+            const reader = new FileReader();
+            reader.readAsText(file);
+            reader.onload = function () {
+                const jsonData = JSON.parse(reader.result);
+                chatHistory = jsonData;
+                messageList.querySelector('ul').innerHTML = "";
+                chatHistory.forEach(function (item) {
+                    let Role = item.role;
+                    if (Role == "user") Role = role_user;
+                    if (Role == "assistant") Role = role_assistant;
+                    addMessage(item.content, Role);
+                });
+            };
+        }
+
+
+        function addZero(num) {
+            const str = new String(num);
+            return str.padStart(2, '0');
+        }
+
+
+        function downloadJSON() {
+            const jsonData = JSON.stringify(chatHistory);
+            const now = new Date();
+            const filename = "Chat History " + now.getFullYear() + addZero(now.getMonth() + 1) + addZero(now.getDate()) + "_" + addZero(now.getHours()) + addZero(now.getMinutes()) + addZero(now.getSeconds()) + ".json";
+            const blob = new File([jsonData], filename, { type: "application/octet-stream" });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement("a");
+            a.href = url;
+            a.download = filename;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+        }
+    </script>
+</body>
+
+</html>
