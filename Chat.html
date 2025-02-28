@@ -22,17 +22,17 @@
         <div>
             <form onsubmit="return false;">
                 <label for="api_url">API URL</label>
-                <input type="text" id="api_url"/>
+                <input type="text" id="api_url" />
                 <button type="button" onclick="setApiUrl()">确定</button>
             </form>
             <form onsubmit="return false;">
                 <label for="auth_h_name">认证头名称</label>
-                <input type="text" id="auth_h_name"/>
+                <input type="text" id="auth_h_name" />
                 <button type="button" onclick="setAuthHeaderName()">确定</button>
             </form>
             <form onsubmit="return false;">
                 <label for="auth_h_content">认证头内容</label>
-                <input type="text" id="auth_h_content"/>
+                <input type="text" id="auth_h_content" />
                 <button type="button" onclick="setAuthHeaderContent()">确定</button>
             </form>
         </div>
@@ -40,16 +40,12 @@
         <div>
             <form onsubmit="return false;">
                 <label for="temperature">Temperature:</label>
-                <input type="text" id="temperature"/>
+                <input type="text" id="temperature" />
                 <button type="button" onclick="setTemperature()">确定</button>
             </form>
         </div>
         <hr>
-        <div id="message-list">
-            <label>历史记录:</label>
-            <ul>
-            </ul>
-        </div>
+        <div id="message-list" style="white-space: pre-wrap;"><label>历史记录:</label><ul></ul></div>
         <hr>
         <div>
             <form onsubmit="return false;">
