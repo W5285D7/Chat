@@ -20,27 +20,27 @@
 <body>
     <div class="content">
         <div>
-            <form>
+            <form onsubmit="return false;">
                 <label for="api_url">API URL</label>
-                <textarea id="api_url" rows="1"></textarea>
+                <input type="text" id="api_url"/>
                 <button type="button" onclick="setApiUrl()">确定</button>
             </form>
-            <form>
+            <form onsubmit="return false;">
                 <label for="auth_h_name">认证头名称</label>
-                <textarea id="auth_h_name" rows="1"></textarea>
+                <input type="text" id="auth_h_name"/>
                 <button type="button" onclick="setAuthHeaderName()">确定</button>
             </form>
-            <form>
+            <form onsubmit="return false;">
                 <label for="auth_h_content">认证头内容</label>
-                <textarea id="auth_h_content" rows="1"></textarea>
+                <input type="text" id="auth_h_content"/>
                 <button type="button" onclick="setAuthHeaderContent()">确定</button>
             </form>
         </div>
         <hr>
         <div>
-            <form>
+            <form onsubmit="return false;">
                 <label for="temperature">Temperature:</label>
-                <textarea id="temperature" rows="1" cols="5"></textarea>
+                <input type="text" id="temperature"/>
                 <button type="button" onclick="setTemperature()">确定</button>
             </form>
         </div>
@@ -52,7 +52,7 @@
         </div>
         <hr>
         <div>
-            <form>
+            <form onsubmit="return false;">
                 <label for="message">用户输入:</label>
                 <textarea id="message" rows="4" style="width: 95%;"></textarea>
                 <br>
@@ -90,12 +90,15 @@
         const temperatureInput = document.getElementById('temperature');
         const messageInput = document.getElementById('message');
 
+        const sendButton = document.querySelector('button[onclick="sendMessage()"]');
+
         let api_endpoint_url = "";
-        let auth_header_name = "Authorization";
+        let auth_header_name = "";
         let auth_header_content = "";
         let chatHistory = new Array();
         let temperature = 1.0;
-
+        let lastMsgLi = null;
+        let lastProcessedPosition = 0;
 
         function setApiUrl() {
             api_endpoint_url = apiUrlInput.value;
@@ -117,8 +120,8 @@
             }
         }
 
-        function updateUsage(response) {
-            const c = response.usage.completion_tokens, p = response.usage.prompt_tokens, tot = response.usage.total_tokens;
+        function updateUsage(usage) {
+            const c = usage.completion_tokens, p = usage.prompt_tokens, tot = usage.total_tokens;
             usageList.innerHTML = "<p>当前使用量(Tokens): " + "输入=" + p.toString() + ", 输出=" + c.toString() + ", 总计=" + tot.toString() + "</p>";
         }
         function getSubstringAfter(str, subStr) {
@@ -133,40 +136,71 @@
 
             const li = document.createElement('li');
             if (sender === role_assistant) li.className = "circle"
-            li.innerText = `${sender}${message}\n`;
-            messageList.querySelector('ul').appendChild(li);
+            li.textContent = `${sender}${message}\n`;
+            lastMsgLi = messageList.querySelector('ul').appendChild(li);
+        }
+        function continueMessage(message) {
+            lastMsgLi.textContent += message;
         }
 
+        function disableSendButton() {
+            sendButton.disabled = true;
+            sendButton.textContent = "发送中...";
+        }
+
+        function enableSendButton() {
+            sendButton.disabled = false;
+            sendButton.textContent = "发送";
+        }
 
         function sendMessage() {
+            disableSendButton();
             const message = messageInput.value;
             messageInput.value = '';
 
+            addMessage(message, role_user);
             chatHistory.push({ "role": "user", "content": message });
-            let reqBody = { "model": "DeepSeek-R1", "messages": chatHistory, "temperature": temperature };
+            let reqBody = { "model": "DeepSeek-R1", "messages": chatHistory, "stream": true, "temperature": temperature };
+            lastProcessedPosition = 0;
 
             const xhr = new XMLHttpRequest();
             xhr.open('POST', api_endpoint_url);
             xhr.setRequestHeader('Content-Type', 'application/json');
             xhr.setRequestHeader(auth_header_name, auth_header_content);
-            xhr.onload = () => {
-                if (xhr.status === 200) {
-                    const response = JSON.parse(xhr.responseText);
-                    updateUsage(response);
-                    trimmedResponse = getSubstringAfter(response.choices[0].message.content, "</think>\n\n")
+            xhr.onloadstart = () => {
+                addMessage("", role_assistant);
+                chatHistory.push({ "role": "assistant", "content": "" });
+            };
+            xhr.onreadystatechange = () => {
+                if (xhr.readyState === 3 || xhr.readyState === 4) {
+                    const responseText = xhr.responseText.substring(lastProcessedPosition);
 
-                    addMessage(message, role_user);
-                    addMessage(trimmedResponse, role_assistant);
-                    chatHistory.push({ "role": "assistant", "content": trimmedResponse });
-                } else {
-                    addMessage(message, role_user + error_msg);
-                    addMessage('消息发送失败，请重试。错误信息：' + xhr.responseText, "系统: ");
-                    chatHistory.pop();
+                    const lines = responseText.split("\n");
+                    for (var i = 0; i < lines.length - 1; ++i) {
+                        if (lines[i].startsWith('data: ')) {
+                            const data = lines[i].substring(6).trim();
+                            if (data && data[0] === '{') {
+                                const response = JSON.parse(data);
+                                if (response.usage != null) updateUsage(response.usage);
+                                if (response.choices != null && response.choices.length > 0) {
+                                    responseMsgChunk = response.choices[0].delta.content;
+                                    continueMessage(responseMsgChunk);
+                                    chatHistory[chatHistory.length - 1].content += responseMsgChunk;
+                                }
+                            }
+                        }
+                        lastProcessedPosition += lines[i].length + 1;
+                    }
                 }
             };
+            xhr.onloadend = () => {
+                enableSendButton();
+                chatHistory[chatHistory.length - 1].content = getSubstringAfter(chatHistory[chatHistory.length - 1].content, "</think>\n\n");
+            };
             xhr.onerror = () => {
-                addMessage(message, role_user + error_msg);
+                enableSendButton();
                 addMessage('消息发送失败，请重试。' + xhr.statusText, "系统: ");
+                chatHistory.pop();
                 chatHistory.pop();
             };
             xhr.send(JSON.stringify(reqBody));
@@ -213,6 +247,7 @@
             document.body.appendChild(a);
             a.click();
             document.body.removeChild(a);
+            URL.revokeObjectURL(url)
         }
     </script>
 </body>
